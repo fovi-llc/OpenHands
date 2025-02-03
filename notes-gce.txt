@@ -1,0 +1,111 @@
+
+gcloud projects create fovi-pup
+gcloud config set project fovi-pup
+
+# https://cloud.google.com/artifact-registry/docs/docker/store-docker-container-images
+
+
+# Enable Artifact Registry API, that will require enabling billing
+
+gcloud artifacts repositories create docker-repo --repository-format=docker \
+    --location=us-central1 --description="Docker repository" \
+    --project=fovi-pup
+
+gcloud auth configure-docker us-central1-docker.pkg.dev
+
+gcloud artifacts repositories list --project=fovi-pup
+
+# https://cloud.google.com/build/docs/build-push-docker-image
+
+cd /Users/jim/Projects/OpenHands-upstream
+git checkout tags/0.12.2
+cd containers/dev
+
+# us-west1 not allowed for Cloud Build to due quota restrictions.
+gcloud builds submit --region=us-central1 --tag us-central1-docker.pkg.dev/fovi-pup/docker-repo/openhand-image:tag-0.12.2
+
+
+docker build -t openhand-image:tag-0.12.3 .
+
+https://docs.all-hands.dev/modules/usage/installation
+
+On MacOS
+DOCKER="docker"
+or for Ubuntu 
+DOCKER="sudo docker"
+
+# OPENHANDS_VERSION="0.12.2"
+OPENHANDS_VERSION="0.14"
+SANDBOX_RUNTIME_CONTAINER_IMAGE="docker.all-hands.dev/all-hands-ai/runtime:$OPENHANDS_VERSION-nikolaik"
+OPENHANDS_IMAGE="docker.all-hands.dev/all-hands-ai/openhands:$OPENHANDS_VERSION"
+
+$DOCKER pull $SANDBOX_RUNTIME_CONTAINER_IMAGE
+$DOCKER pull $OPENHANDS_IMAGE
+
+$DOCKER run -it --rm \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=$SANDBOX_RUNTIME_CONTAINER_IMAGE \
+    -e LOG_ALL_EVENTS=true \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -p 3000:3000 \
+    --add-host host.docker.internal:host-gateway \
+    --name openhands-app \
+    $OPENHANDS_IMAGE
+
+
+https://docs.all-hands.dev/modules/usage/how-to/headless-mode
+
+gcloud on Ubuntu - use us-central1 for best compute pricing
+https://cloud.google.com/sdk/docs/install-sdk#deb
+
+https://cloud.google.com/artifact-registry/docs/docker/store-docker-container-images
+
+$DOCKER tag $SANDBOX_RUNTIME_CONTAINER_IMAGE \
+  us-central1-docker.pkg.dev/fovi-pup/docker-repo/runtime:$OPENHANDS_VERSION-nikolaik
+$DOCKER tag $OPENHANDS_IMAGE \
+  us-central1-docker.pkg.dev/fovi-pup/docker-repo/openhands:$OPENHANDS_VERSION
+
+$DOCKER image ls
+
+# This didn't do it.
+gcloud auth configure-docker us-central1-docker.pkg.dev
+
+# https://cloud.google.com/artifact-registry/docs/docker/authentication#standalone-helper
+
+VERSION=2.1.25
+OS=linux  # or "darwin" for OSX, "windows" for Windows.
+ARCH=amd64  # or "386" for 32-bit OSs
+
+curl -fsSL "https://github.com/GoogleCloudPlatform/docker-credential-gcr/releases/download/v${VERSION}/docker-credential-gcr_${OS}_${ARCH}-${VERSION}.tar.gz" \
+| tar xz docker-credential-gcr \
+&& chmod +x docker-credential-gcr && sudo mv docker-credential-gcr /usr/bin/
+
+AR_HOSTNAME=us-central1-docker.pkg.dev
+docker-credential-gcr configure-docker --registries=$AR_HOSTNAME
+
+echo "https://$AR_HOSTNAME" | docker-credential-gcr get
+# That didn't work and refered to https://cloud.google.com/docs/authentication/application-default-credentials
+# Needed to do: https://cloud.google.com/docs/authentication/gcloud#gcloud-credentials
+
+gcloud auth application-default login
+
+# Did this but didn't help - https://cloud.google.com/artifact-registry/docs/access-control#grant-project
+gcloud artifacts repositories add-iam-policy-binding docker-repo \
+   --location=us-central1 \
+   --member=user:jim@fovi.com \
+   --role=roles/artifactregistry.writer
+
+# https://cloud.google.com/artifact-registry/docs/docker/pushing-and-pulling#auth
+
+sudo usermod -a -G docker ${USER}
+
+# FINALLY - like someone commented - easy to forget to sudo for docker so it can write the token to ~root.
+gcloud auth print-access-token | $DOCKER login -u oauth2accesstoken --password-stdin https://$AR_HOSTNAME
+# WARNING! Your password will be stored unencrypted in /root/.docker/config.json.
+# Configure a credential helper to remove this warning. See
+# https://docs.docker.com/engine/reference/commandline/login/#credential-stores
+# 
+# Login Succeeded
+
+$DOCKER push $AR_HOSTNAME/fovi-pup/docker-repo/runtime:$OPENHANDS_VERSION-nikolaik
+$DOCKER push $AR_HOSTNAME/fovi-pup/docker-repo/openhands:$OPENHANDS_VERSION
+

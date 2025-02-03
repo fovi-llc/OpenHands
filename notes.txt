@@ -1,0 +1,28 @@
+
+
+WORKSPACE_BASE=$(pwd)/workspace
+OH_VERSION=0.9
+
+docker run -it \
+    --pull=always \
+    -e SANDBOX_USER_ID=$(id -u) \
+    -e WORKSPACE_MOUNT_PATH=$WORKSPACE_BASE \
+    -v $WORKSPACE_BASE:/opt/workspace_base \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -p 3000:3000 \
+    --add-host host.docker.internal:host-gateway \
+    --name openhands-app-$(date +%Y%m%d%H%M%S) \
+    ghcr.io/all-hands-ai/openhands:$OH_VERSION 
+
+
+I just had this problem too with both the main HEAD and 0.9.0 tag on a fresh install on MacOS.  
+The problem is that pyproject.toml specifies a git repo instead of the 2.0.12 that is in the poetry.lock for swebench:
+
+pyproject.toml 
+```
+114   [tool.poetry.group.evaluation.dependencies]
+...
+119 - swebench = { git = "https://github.com/All-Hands-AI/SWE-bench.git" }
+119 + swebench = "*" # { git = "https://github.com/All-Hands-AI/SWE-bench.git" }
+```
+
