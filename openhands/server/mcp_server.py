@@ -8,10 +8,8 @@ through the Model Context Protocol.
 
 import asyncio
 import json
-import logging
 import os
-import tempfile
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Optional
 
 import uvicorn
 from fastapi import FastAPI
@@ -19,17 +17,13 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from openhands.controller.agent import Agent
-from openhands.core.config import OpenHandsConfig, setup_config_from_args
+from openhands.core.config import OpenHandsConfig
 from openhands.core.config.utils import finalize_config
 from openhands.core.logger import openhands_logger as logger
 from openhands.core.main import run_controller
 from openhands.core.setup import create_agent, create_runtime, generate_sid
 from openhands.events.action import MessageAction
-from openhands.events.observation import AgentStateChangedObservation
-from openhands.io.io import read_task
 from openhands.runtime.base import Runtime
-
 
 # Global runtime and config for the MCP server
 _global_runtime: Optional[Runtime] = None
@@ -51,10 +45,18 @@ async def initialize_openhands(config: OpenHandsConfig) -> None:
 
 @mcp_server.tool()
 async def run_task(
-    task: Annotated[str, Field(description="The task description for OpenHands to execute")],
-    agent_name: Annotated[str, Field(description="Name of the agent to use (default: CodeActAgent)")] = "CodeActAgent",
-    max_iterations: Annotated[int, Field(description="Maximum number of iterations to run (default: 10)")] = 10,
-    workspace_dir: Annotated[Optional[str], Field(description="Working directory for the task (optional)")] = None,
+    task: Annotated[
+        str, Field(description='The task description for OpenHands to execute')
+    ],
+    agent_name: Annotated[
+        str, Field(description='Name of the agent to use (default: CodeActAgent)')
+    ] = 'CodeActAgent',
+    max_iterations: Annotated[
+        int, Field(description='Maximum number of iterations to run (default: 10)')
+    ] = 10,
+    workspace_dir: Annotated[
+        Optional[str], Field(description='Working directory for the task (optional)')
+    ] = None,
 ) -> str:
     """
     Execute a task using OpenHands with a specified agent.
@@ -69,7 +71,7 @@ async def run_task(
         A summary of the task execution results
     """
     if not _global_config or not _global_runtime:
-        raise ToolError("OpenHands is not properly initialized")
+        raise ToolError('OpenHands is not properly initialized')
 
     try:
         # Create a copy of the config for this task
@@ -107,52 +109,65 @@ async def run_task(
             if final_state:
                 # Prepare response with execution summary
                 result = {
-                    "task": task,
-                    "agent_used": agent_name,
-                    "iterations_completed": len(final_state.history),
-                    "exit_reason": final_state.last_error or "Completed successfully",
-                    "final_agent_state": final_state.agent_state.value if final_state.agent_state else "unknown",
+                    'task': task,
+                    'agent_used': agent_name,
+                    'iterations_completed': len(final_state.history),
+                    'exit_reason': final_state.last_error or 'Completed successfully',
+                    'final_agent_state': final_state.agent_state.value
+                    if final_state.agent_state
+                    else 'unknown',
                 }
 
                 # Include the last few events for context
                 recent_events = []
                 for event in final_state.history[-5:]:  # Last 5 events
                     event_data = {
-                        "source": event.source.value if hasattr(event, 'source') else "unknown",
-                        "timestamp": event.timestamp.isoformat() if hasattr(event, 'timestamp') else None,
+                        'source': event.source.value
+                        if hasattr(event, 'source')
+                        else 'unknown',
+                        'timestamp': event.timestamp.isoformat()
+                        if hasattr(event, 'timestamp')
+                        else None,
                     }
 
                     # Add specific event details based on type
                     if hasattr(event, 'content'):
-                        event_data["content"] = event.content[:500]  # Truncate long content
+                        event_data['content'] = event.content[
+                            :500
+                        ]  # Truncate long content
                     elif hasattr(event, 'observation'):
-                        event_data["observation"] = str(event.observation)[:500]
+                        event_data['observation'] = str(event.observation)[:500]
 
                     recent_events.append(event_data)
 
-                result["recent_events"] = recent_events
+                result['recent_events'] = recent_events
 
                 return json.dumps(result, indent=2)
             else:
-                return json.dumps({
-                    "error": "Task execution failed - no final state returned",
-                    "task": task,
-                    "agent_used": agent_name
-                }, indent=2)
+                return json.dumps(
+                    {
+                        'error': 'Task execution failed - no final state returned',
+                        'task': task,
+                        'agent_used': agent_name,
+                    },
+                    indent=2,
+                )
 
         finally:
             # Clean up runtime
             await runtime.close()
 
     except Exception as e:
-        logger.error(f"Error executing task: {e}", exc_info=True)
-        raise ToolError(f"Failed to execute task: {str(e)}")
+        logger.error(f'Error executing task: {e}', exc_info=True)
+        raise ToolError(f'Failed to execute task: {str(e)}')
 
 
 @mcp_server.tool()
 async def execute_command(
-    command: Annotated[str, Field(description="Shell command to execute")],
-    working_dir: Annotated[Optional[str], Field(description="Working directory to execute the command in")] = None,
+    command: Annotated[str, Field(description='Shell command to execute')],
+    working_dir: Annotated[
+        Optional[str], Field(description='Working directory to execute the command in')
+    ] = None,
 ) -> str:
     """
     Execute a shell command using OpenHands runtime.
@@ -165,7 +180,7 @@ async def execute_command(
         Command output and exit code
     """
     if not _global_runtime:
-        raise ToolError("OpenHands runtime is not initialized")
+        raise ToolError('OpenHands runtime is not initialized')
 
     try:
         from openhands.events.action import CmdRunAction
@@ -173,7 +188,7 @@ async def execute_command(
         # Create command action
         if working_dir:
             # Change to working directory and execute command
-            full_command = f"cd {working_dir} && {command}"
+            full_command = f'cd {working_dir} && {command}'
         else:
             full_command = command
 
@@ -183,24 +198,28 @@ async def execute_command(
         observation = _global_runtime.run_action(action)
 
         result = {
-            "command": command,
-            "working_dir": working_dir,
-            "exit_code": getattr(observation, 'exit_code', None),
-            "content": getattr(observation, 'content', str(observation)),
+            'command': command,
+            'working_dir': working_dir,
+            'exit_code': getattr(observation, 'exit_code', None),
+            'content': getattr(observation, 'content', str(observation)),
         }
 
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error(f"Error executing command: {e}", exc_info=True)
-        raise ToolError(f"Failed to execute command: {str(e)}")
+        logger.error(f'Error executing command: {e}', exc_info=True)
+        raise ToolError(f'Failed to execute command: {str(e)}')
 
 
 @mcp_server.tool()
 async def read_file(
-    file_path: Annotated[str, Field(description="Path to the file to read")],
-    start_line: Annotated[Optional[int], Field(description="Starting line number (1-based, optional)")] = None,
-    end_line: Annotated[Optional[int], Field(description="Ending line number (1-based, optional)")] = None,
+    file_path: Annotated[str, Field(description='Path to the file to read')],
+    start_line: Annotated[
+        Optional[int], Field(description='Starting line number (1-based, optional)')
+    ] = None,
+    end_line: Annotated[
+        Optional[int], Field(description='Ending line number (1-based, optional)')
+    ] = None,
 ) -> str:
     """
     Read a file using OpenHands runtime.
@@ -214,7 +233,7 @@ async def read_file(
         File content or specified line range
     """
     if not _global_runtime:
-        raise ToolError("OpenHands runtime is not initialized")
+        raise ToolError('OpenHands runtime is not initialized')
 
     try:
         from openhands.events.action import FileReadAction
@@ -235,24 +254,27 @@ async def read_file(
             content = '\n'.join(lines[start_idx:end_idx])
 
         result = {
-            "file_path": file_path,
-            "start_line": start_line,
-            "end_line": end_line,
-            "content": content,
+            'file_path': file_path,
+            'start_line': start_line,
+            'end_line': end_line,
+            'content': content,
         }
 
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error(f"Error reading file: {e}", exc_info=True)
-        raise ToolError(f"Failed to read file: {str(e)}")
+        logger.error(f'Error reading file: {e}', exc_info=True)
+        raise ToolError(f'Failed to read file: {str(e)}')
 
 
 @mcp_server.tool()
 async def write_file(
-    file_path: Annotated[str, Field(description="Path to the file to write")],
-    content: Annotated[str, Field(description="Content to write to the file")],
-    create_dirs: Annotated[bool, Field(description="Whether to create parent directories if they don't exist")] = True,
+    file_path: Annotated[str, Field(description='Path to the file to write')],
+    content: Annotated[str, Field(description='Content to write to the file')],
+    create_dirs: Annotated[
+        bool,
+        Field(description="Whether to create parent directories if they don't exist"),
+    ] = True,
 ) -> str:
     """
     Write content to a file using OpenHands runtime.
@@ -266,7 +288,7 @@ async def write_file(
         Success confirmation with file details
     """
     if not _global_runtime:
-        raise ToolError("OpenHands runtime is not initialized")
+        raise ToolError('OpenHands runtime is not initialized')
 
     try:
         from openhands.events.action import FileWriteAction
@@ -284,24 +306,26 @@ async def write_file(
         observation = _global_runtime.run_action(action)
 
         result = {
-            "file_path": file_path,
-            "content_length": len(content),
-            "success": True,
-            "message": getattr(observation, 'content', 'File written successfully'),
+            'file_path': file_path,
+            'content_length': len(content),
+            'success': True,
+            'message': getattr(observation, 'content', 'File written successfully'),
         }
 
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error(f"Error writing file: {e}", exc_info=True)
-        raise ToolError(f"Failed to write file: {str(e)}")
+        logger.error(f'Error writing file: {e}', exc_info=True)
+        raise ToolError(f'Failed to write file: {str(e)}')
 
 
 @mcp_server.tool()
 async def edit_file(
-    file_path: Annotated[str, Field(description="Path to the file to edit")],
-    old_str: Annotated[str, Field(description="String to replace in the file")],
-    new_str: Annotated[str, Field(description="New string to replace the old string with")],
+    file_path: Annotated[str, Field(description='Path to the file to edit')],
+    old_str: Annotated[str, Field(description='String to replace in the file')],
+    new_str: Annotated[
+        str, Field(description='New string to replace the old string with')
+    ],
 ) -> str:
     """
     Edit a file by replacing text using OpenHands runtime.
@@ -315,7 +339,7 @@ async def edit_file(
         Edit confirmation with details
     """
     if not _global_runtime:
-        raise ToolError("OpenHands runtime is not initialized")
+        raise ToolError('OpenHands runtime is not initialized')
 
     try:
         from openhands.events.action import FileEditAction
@@ -327,18 +351,18 @@ async def edit_file(
         observation = _global_runtime.run_action(action)
 
         result = {
-            "file_path": file_path,
-            "old_str": old_str,
-            "new_str": new_str,
-            "success": True,
-            "message": getattr(observation, 'content', 'File edited successfully'),
+            'file_path': file_path,
+            'old_str': old_str,
+            'new_str': new_str,
+            'success': True,
+            'message': getattr(observation, 'content', 'File edited successfully'),
         }
 
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error(f"Error editing file: {e}", exc_info=True)
-        raise ToolError(f"Failed to edit file: {str(e)}")
+        logger.error(f'Error editing file: {e}', exc_info=True)
+        raise ToolError(f'Failed to edit file: {str(e)}')
 
 
 @mcp_server.tool()
@@ -355,23 +379,25 @@ async def list_agents() -> str:
         agents = []
         for agent_name, agent_cls in _ALL_AGENTS.items():
             agent_info = {
-                "name": agent_name,
-                "class": agent_cls.__name__,
-                "module": agent_cls.__module__,
-                "description": getattr(agent_cls, '__doc__', 'No description available'),
+                'name': agent_name,
+                'class': agent_cls.__name__,
+                'module': agent_cls.__module__,
+                'description': getattr(
+                    agent_cls, '__doc__', 'No description available'
+                ),
             }
             agents.append(agent_info)
 
         result = {
-            "available_agents": agents,
-            "total_count": len(agents),
+            'available_agents': agents,
+            'total_count': len(agents),
         }
 
         return json.dumps(result, indent=2)
 
     except Exception as e:
-        logger.error(f"Error listing agents: {e}", exc_info=True)
-        raise ToolError(f"Failed to list agents: {str(e)}")
+        logger.error(f'Error listing agents: {e}', exc_info=True)
+        raise ToolError(f'Failed to list agents: {str(e)}')
 
 
 @mcp_server.tool()
@@ -387,22 +413,22 @@ async def get_server_status() -> str:
         config_loaded = _global_config is not None
 
         status = {
-            "server_status": "running",
-            "runtime_initialized": runtime_initialized,
-            "config_loaded": config_loaded,
-            "openhands_version": "latest",  # You could import the actual version
+            'server_status': 'running',
+            'runtime_initialized': runtime_initialized,
+            'config_loaded': config_loaded,
+            'openhands_version': 'latest',  # You could import the actual version
         }
 
         if config_loaded and _global_config:
-            status["sandbox_type"] = _global_config.sandbox.type
-            status["default_agent"] = _global_config.default_agent
-            status["max_iterations"] = _global_config.max_iterations
+            status['sandbox_type'] = _global_config.sandbox.type
+            status['default_agent'] = _global_config.default_agent
+            status['max_iterations'] = _global_config.max_iterations
 
         return json.dumps(status, indent=2)
 
     except Exception as e:
-        logger.error(f"Error getting server status: {e}", exc_info=True)
-        raise ToolError(f"Failed to get server status: {str(e)}")
+        logger.error(f'Error getting server status: {e}', exc_info=True)
+        raise ToolError(f'Failed to get server status: {str(e)}')
 
 
 async def create_mcp_server_app(config: OpenHandsConfig) -> FastAPI:
@@ -411,31 +437,34 @@ async def create_mcp_server_app(config: OpenHandsConfig) -> FastAPI:
     await initialize_openhands(config)
 
     # Create FastAPI app and mount MCP server
-    app = FastAPI(title="OpenHands MCP Server", version="1.0.0")
+    app = FastAPI(title='OpenHands MCP Server', version='1.0.0')
 
-    # Mount the MCP server
-    app.mount("/mcp", mcp_server.create_app())
+    # Mount the MCP server using http_app() method
+    mcp_app = mcp_server.http_app()
+    app.mount('/mcp', mcp_app)
 
-    @app.get("/health")
+    @app.get('/health')
     async def health_check():
         """Health check endpoint."""
         return {
-            "status": "healthy",
-            "runtime_initialized": _global_runtime is not None,
-            "config_loaded": _global_config is not None,
+            'status': 'healthy',
+            'runtime_initialized': _global_runtime is not None,
+            'config_loaded': _global_config is not None,
         }
 
     return app
 
 
-async def run_mcp_server(host: str = "127.0.0.1", port: int = 8000, config: Optional[OpenHandsConfig] = None):
+async def run_mcp_server(
+    host: str = '127.0.0.1', port: int = 8000, config: Optional[OpenHandsConfig] = None
+):
     """Run the OpenHands MCP server."""
     if config is None:
         # Create a default config
         config = OpenHandsConfig()
         config = finalize_config(config)
 
-    logger.info(f"Starting OpenHands MCP Server on {host}:{port}")
+    logger.info(f'Starting OpenHands MCP Server on {host}:{port}')
 
     # Create the FastAPI app
     app = await create_mcp_server_app(config)
@@ -445,7 +474,7 @@ async def run_mcp_server(host: str = "127.0.0.1", port: int = 8000, config: Opti
         app,
         host=host,
         port=port,
-        log_level="info",
+        log_level='info',
         access_log=True,
     )
 
@@ -454,20 +483,20 @@ async def run_mcp_server(host: str = "127.0.0.1", port: int = 8000, config: Opti
     try:
         await server.serve()
     except KeyboardInterrupt:
-        logger.info("Shutting down OpenHands MCP Server...")
+        logger.info('Shutting down OpenHands MCP Server...')
     finally:
         # Clean up global runtime
         if _global_runtime:
-            await _global_runtime.close()
+            _global_runtime.close()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     # Simple CLI runner for testing
     import argparse
 
-    parser = argparse.ArgumentParser(description="Run OpenHands MCP Server")
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
-    parser.add_argument("--port", type=int, default=8000, help="Port to listen on")
+    parser = argparse.ArgumentParser(description='Run OpenHands MCP Server')
+    parser.add_argument('--host', default='127.0.0.1', help='Host to bind to')
+    parser.add_argument('--port', type=int, default=8000, help='Port to listen on')
 
     args = parser.parse_args()
 
