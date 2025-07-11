@@ -765,6 +765,24 @@ def get_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
     )
+    parser.add_argument(
+        '--mcp-server',
+        help='Run OpenHands as an MCP server',
+        action='store_true',
+        default=False,
+    )
+    parser.add_argument(
+        '--mcp-server-port',
+        help='Port for the MCP server to listen on',
+        type=int,
+        default=8000,
+    )
+    parser.add_argument(
+        '--mcp-server-host',
+        help='Host for the MCP server to bind to',
+        type=str,
+        default='127.0.0.1',
+    )
     return parser
 
 

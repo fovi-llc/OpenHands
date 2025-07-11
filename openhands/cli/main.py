@@ -379,6 +379,18 @@ async def main_with_loop(loop: asyncio.AbstractEventLoop) -> None:
     # Load config from toml and override with command line arguments
     config: OpenHandsConfig = setup_config_from_args(args)
 
+    # Check if MCP server mode is requested
+    if args.mcp_server:
+        from openhands.server.mcp_server import run_mcp_server
+
+        logger.info(f"Starting OpenHands MCP Server on {args.mcp_server_host}:{args.mcp_server_port}")
+        await run_mcp_server(
+            host=args.mcp_server_host,
+            port=args.mcp_server_port,
+            config=config,
+        )
+        return
+
     # Attempt to install VS Code extension if applicable (one-time attempt)
     attempt_vscode_extension_install()
 
