@@ -82,10 +82,10 @@ async def run_task(
         if workspace_dir:
             if not os.path.exists(workspace_dir):
                 os.makedirs(workspace_dir, exist_ok=True)
-            config.sandbox.workspace_base = workspace_dir
+            config.workspace_base = workspace_dir
 
         # Create agent
-        agent = create_agent(config, agent_name)
+        agent = create_agent(config)
 
         # Create runtime for this task
         sid = generate_sid(config)
@@ -121,13 +121,21 @@ async def run_task(
                 # Include the last few events for context
                 recent_events = []
                 for event in final_state.history[-5:]:  # Last 5 events
+                    # Create event data with safe access
+                    source_value = 'unknown'
+                    if hasattr(event, 'source') and event.source:
+                        source_value = getattr(event.source, 'value', str(event.source))
+
+                    timestamp_str = None
+                    if hasattr(event, 'timestamp') and event.timestamp:
+                        if hasattr(event.timestamp, 'isoformat'):
+                            timestamp_str = event.timestamp.isoformat()
+                        else:
+                            timestamp_str = str(event.timestamp)
+
                     event_data = {
-                        'source': event.source.value
-                        if hasattr(event, 'source')
-                        else 'unknown',
-                        'timestamp': event.timestamp.isoformat()
-                        if hasattr(event, 'timestamp')
-                        else None,
+                        'source': source_value,
+                        'timestamp': timestamp_str,
                     }
 
                     # Add specific event details based on type
@@ -155,7 +163,7 @@ async def run_task(
 
         finally:
             # Clean up runtime
-            await runtime.close()
+            runtime.close()
 
     except Exception as e:
         logger.error(f'Error executing task: {e}', exc_info=True)
@@ -374,19 +382,24 @@ async def list_agents() -> str:
         JSON list of available agent names and descriptions
     """
     try:
-        from openhands.agenthub import _ALL_AGENTS
+        from openhands.controller.agent import Agent
 
+        agent_names = Agent.list_agents()
         agents = []
-        for agent_name, agent_cls in _ALL_AGENTS.items():
-            agent_info = {
-                'name': agent_name,
-                'class': agent_cls.__name__,
-                'module': agent_cls.__module__,
-                'description': getattr(
-                    agent_cls, '__doc__', 'No description available'
-                ),
-            }
-            agents.append(agent_info)
+        for agent_name in agent_names:
+            try:
+                agent_cls = Agent.get_cls(agent_name)
+                agent_info = {
+                    'name': agent_name,
+                    'class': agent_cls.__name__,
+                    'module': agent_cls.__module__,
+                    'description': getattr(
+                        agent_cls, '__doc__', 'No description available'
+                    ),
+                }
+                agents.append(agent_info)
+            except Exception as e:
+                logger.warning(f'Could not get info for agent {agent_name}: {e}')
 
         result = {
             'available_agents': agents,
@@ -420,7 +433,7 @@ async def get_server_status() -> str:
         }
 
         if config_loaded and _global_config:
-            status['sandbox_type'] = _global_config.sandbox.type
+            status['runtime'] = _global_config.runtime
             status['default_agent'] = _global_config.default_agent
             status['max_iterations'] = _global_config.max_iterations
 
@@ -456,13 +469,15 @@ async def create_mcp_server_app(config: OpenHandsConfig) -> FastAPI:
 
 
 async def run_mcp_server(
-    host: str = '127.0.0.1', port: int = 8000, config: Optional[OpenHandsConfig] = None
+    host: str = '127.0.0.1',
+    port: int = 8000,
+    config: Optional[OpenHandsConfig] = None,
 ):
     """Run the OpenHands MCP server."""
     if config is None:
         # Create a default config
         config = OpenHandsConfig()
-        config = finalize_config(config)
+        finalize_config(config)
 
     logger.info(f'Starting OpenHands MCP Server on {host}:{port}')
 
